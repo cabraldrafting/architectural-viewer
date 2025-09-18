@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Client Management</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+      <h1 class="text-2xl font-bold text-gray-800 mb-4">Client Management</h1>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Add New Client Form -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h2 class="font-semibold mb-3">Add New Client</h2>
+          <form id="add-client-form" class="space-y-3">
+            <input type="text" id="client-name" placeholder="Client Name" class="w-full p-2 border rounded" required>
+            <input type="email" id="client-email" placeholder="Contact Email (optional)" class="w-full p-2 border rounded">
+            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Add Client</button>
+          </form>
+        </div>
+        
+        <!-- Upload Model Form -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h2 class="font-semibold mb-3">Upload Model</h2>
+          <form id="upload-form" enctype="multipart/form-data" class="space-y-3">
+            <select id="client-select" class="w-full p-2 border rounded" required>
+              <option value="">Select Client</option>
+              <!-- Populated dynamically -->
+            </select>
+            <input type="text" id="upload-project-id" placeholder="Project ID (e.g., highway002)" class="w-full p-2 border rounded" required>
+            <input type="text" id="upload-description" placeholder="Project Description" class="w-full p-2 border rounded">
+            <input type="file" id="model-file" accept=".glb" class="w-full p-2 border rounded" required>
+            <button type="submit" class="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700">Upload Model</button>
+          </form>
+        </div>
+        
+        <!-- Client Stats -->
+        <div class="bg-blue-50 p-4 rounded-lg">
+          <h2 class="font-semibold mb-3">Statistics</h2>
+          <div id="stats" class="space-y-2">
+            <p>Total Clients: <span id="total-clients">0</span></p>
+            <p>Total Projects: <span id="total-projects">0</span></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Clients List -->
+    <div class="bg-white rounded-lg shadow-md p-6">
+      <h2 class="text-xl font-semibold mb-4">All Clients & Projects</h2>
+      <div id="clients-list" class="space-y-4">
+        <!-- Dynamic content loaded here -->
+      </div>
+    </div>
+    
+    <!-- Debug Info -->
+    <div class="bg-yellow-50 border border-yellow-200 rounded p-4 mt-4">
+      <h3 class="font-semibold text-yellow-800 mb-2">Debug Info</h3>
+      <p id="debug-status" class="text-sm text-yellow-700">Loading...</p>
+    </div>
+  </div>
+
+  <script>
+    // Enhanced error handling function
+    function handleError(error, context = 'Unknown') {
+      console.error(`❌ ${context} Error:`, error);
+      console.error('Full error object:', JSON.stringify(error, null, 2));
+      if (error.stack) console.error('Stack trace:', error.stack);
+      
+      const errorMsg = error.message || error.statusText || 'Unknown error';
+      document.getElementById('debug-status').innerHTML = `
+        <span class="text-red-600">❌ ${context}: ${errorMsg}</span><br>
+        <small class="text-yellow-600">Check console for details</small>
+      `;
+    }
+
+    // HTML escape function for security
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Load clients on page load
+    async function loadClients() {
+      console.log('🔄 Starting loadClients()...');
+      document.getElementById('debug-status').textContent = 'Loading clients...';
+      
+      try {
+        console.log('📡 Fetching /api/admin/clients...');
+        const response = await fetch('/api/admin/clients');
+        console.log('📡 Response received:', response.status, response.statusText);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const textResponse = await response.text();
+        console.log('📄 Raw response text:', textResponse.substring(0, 200) + '...');
+        
+        let data;
+        try {
+          data = JSON.parse(textResponse);
+          console.log('✅ JSON parsed successfully:', data);
+        } catch (parseError) {
+          console.error('❌ JSON parse failed:', parseError);
+          throw new Error(`Invalid JSON: ${parseError.message}`);
+        }
+        
+        const { clients } = data;
+        if (!clients || !Array.isArray(clients)) {
+          throw new Error('Invalid response structure - no clients array');
+        }
+        
+        console.log('📊 Processing', clients.length, 'clients...');
+        
+        // Update stats
+        document.getElementById('total-clients').textContent = clients.length;
+        const totalProjects = clients.reduce((total, client) => total + (client.projectCount || 0), 0);
+        document.getElementById('total-projects').textContent = totalProjects;
+        
+        // Populate client dropdown
+        const clientSelect = document.getElementById('client-select');
+        clientSelect.innerHTML = '<option value="">Select Client</option>';
+        clients.forEach(client => {
+          const option = document.createElement('option');
+          option.value = client.id;
+          option.textContent = client.name;
+          clientSelect.appendChild(option);
+        });
+        console.log('✅ Dropdown populated with', clients.length, 'options');
+        
+        // Display clients with delete buttons
+        const clientsList = document.getElementById('clients-list');
+        clientsList.innerHTML = '';
+        
+        clients.forEach(client => {
+          try {
+            const clientDiv = document.createElement('div');
+            clientDiv.className = 'border rounded-lg p-4 hover:bg-gray-50';
+            
+            clientDiv.innerHTML = `
+              <div class="flex justify-between items-start mb-2">
+                <h3 class="font-semibold text-lg">${escapeHtml(client.name)}</h3>
+                <div class="space-x-2">
+                  <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm">
+                    ${client.projectCount || 0} projects
+                  </span>
+                  <button onclick="deleteClient('${escapeHtml(client.id)}')" 
+                          class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">
+                    Delete Client
+                  </button>
+                </div>
+              </div>
+              ${client.contact ? `<p class="text-gray-600 mb-3">${escapeHtml(client.contact)}</p>` : ''}
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                ${Object.entries(client.projects || {}).map(([id, project]) => `
+                  <div class="bg-gray-50 p-3 rounded relative">
+                    <div class="font-medium">${escapeHtml(id)}</div>
+                    <div class="text-sm text-gray-600">${escapeHtml(project.description || 'No description')}</div>
+                    <div class="text-xs text-gray-400 mt-1">${escapeHtml(project.uploaded || 'Unknown date')}</div>
+                    <button onclick="deleteProject('${escapeHtml(client.id)}', '${escapeHtml(id)}')" 
+                            class="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600">
+                      Delete
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+            clientsList.appendChild(clientDiv);
+          } catch (renderError) {
+            console.error(`❌ Error rendering client ${client.id}:`, renderError);
+          }
+        });
+        
+        console.log('✅ loadClients() completed successfully');
+        document.getElementById('debug-status').textContent = `Loaded ${clients.length} clients, ${totalProjects} projects`;
+        
+      } catch (error) {
+        handleError(error, 'loadClients');
+        document.getElementById('clients-list').innerHTML = '<p class="text-red-500">Error loading clients. Check debug info above.</p>';
+      }
+    }
+
+    // Add new client form
+    document.getElementById('add-client-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      console.log('📝 Add client form submitted');
+      
+      const clientData = {
+        name: document.getElementById('client-name').value.trim(),
+        contact: document.getElementById('client-email').value.trim()
+      };
+
+      if (!clientData.name) {
+        alert('Client name is required');
+        return;
+      }
+
+      try {
+        console.log('📡 POST /api/admin/client with:', clientData);
+        const response = await fetch('/api/admin/client', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(clientData)
+        });
+        
+        console.log('📡 Response:', response.status);
+        const result = await response.json();
+        
+        if (response.ok) {
+          alert(`Success! Added client ${clientData.name}`);
+          e.target.reset();
+          loadClients();
+        } else {
+          alert('Error: ' + (result.error || 'Unknown server error'));
+        }
+      } catch (error) {
+        handleError(error, 'Add Client');
+      }
+    });
+
+    // Upload model form
+    document.getElementById('upload-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      console.log('📁 Upload form submitted');
+      
+      const clientSelect = document.getElementById('client-select');
+      const projectInput = document.getElementById('upload-project-id');
+      const fileInput = document.getElementById('model-file');
+      
+      if (!clientSelect.value) {
+        alert('Please select a client');
+        return;
+      }
+      if (!projectInput.value.trim()) {
+        alert('Project ID is required');
+        return;
+      }
+      if (!fileInput.files[0]) {
+        alert('Please select a .glb file');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('clientId', clientSelect.value);
+      formData.append('projectId', projectInput.value.trim());
+      formData.append('description', document.getElementById('upload-description').value.trim());
+      formData.append('model', fileInput.files[0]);
+
+      try {
+        console.log('📡 POST /api/admin/upload with file:', fileInput.files[0].name);
+        document.getElementById('debug-status').textContent = 'Uploading...';
+        
+        const response = await fetch('/api/admin/upload', {
+          method: 'POST',
+          body: formData
+        });
+        
+        console.log('📡 Upload response:', response.status);
+        const result = await response.json();
+        
+        if (response.ok) {
+          alert(`Success! Uploaded ${result.filename} for ${result.clientId}/${result.projectId}`);
+          e.target.reset();
+          loadClients();
+        } else {
+          alert('Error: ' + (result.error || 'Unknown upload error'));
+        }
+      } catch (error) {
+        handleError(error, 'Upload Model');
+      }
+    });
+
+    // Delete project function
+    async function deleteProject(clientId, projectId) {
+      if (!confirm(`Are you sure you want to delete project "${projectId}"? This cannot be undone.`)) {
+        return;
+      }
+      
+      console.log('🗑️ Attempting to delete:', clientId, projectId);
+      document.getElementById('debug-status').textContent = 'Deleting project...';
+      
+      try {
+        const response = await fetch(`/api/admin/client/${clientId}/project/${projectId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        console.log('🗑️ Delete response:', response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('🗑️ Server error response:', errorText);
+          throw new Error(`Server error ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('🗑️ Delete result:', result);
+        
+        alert(result.message || 'Project deleted successfully');
+        loadClients();
+      } catch (error) {
+        handleError(error, 'Delete Project');
+      }
+    }
+
+    // Delete entire client function
+    async function deleteClient(clientId) {
+      if (!confirm(`Are you sure you want to delete client and ALL projects? This cannot be undone.`)) {
+        return;
+      }
+      
+      console.log('🗑️ Attempting to delete client:', clientId);
+      document.getElementById('debug-status').textContent = 'Deleting client...';
+      
+      try {
+        const response = await fetch(`/api/admin/client/${clientId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        console.log('🗑️ Client delete response:', response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Server error ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('🗑️ Client delete result:', result);
+        
+        alert(result.message || 'Client deleted successfully');
+        loadClients();
+      } catch (error) {
+        handleError(error, 'Delete Client');
+      }
+    }
+
+    // Initialize on page load
+    console.log('🚀 Admin page loading...');
+    window.addEventListener('load', () => {
+      console.log('✅ Page loaded, starting loadClients()');
+      loadClients();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Upload 3D Model</title>
+</head>
+<body>
+  <h1>Upload Your 3D Model</h1>
+  <p>Upload .obj or .glb file, and if needed, .mtl and any texture files (.jpg, .png, etc.) all at once.</p>
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="files" multiple accept=".glb,.obj,.mtl,.jpg,.png,.jpeg,.tga">
+    <button type="submit">Upload</button>
+  </form>
+</body>
+</html>

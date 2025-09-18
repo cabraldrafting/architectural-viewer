@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Client Project Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .glass-effect {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    .input-field {
+      border: 2px solid #e2e8f0;
+      transition: all 0.3s ease;
+    }
+    .input-field:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      transition: all 0.3s ease;
+    }
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+    }
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .error {
+      color: #ef4444;
+      display: none;
+      animation: shake 0.5s ease-in-out;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-5px); }
+      75% { transform: translateX(5px); }
+    }
+    .success {
+      color: #10b981;
+      display: none;
+    }
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .debug-info {
+      display: none;
+      background: rgba(255, 255, 224, 0.9);
+      border: 1px solid #fde68a;
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #78350f;
+    }
+  </style>
+</head>
+<body>
+  <div class="glass-effect rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4">
+    <div class="text-center mb-6">
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">ScreenScape</h1>
+      <p class="text-gray-600">Access Your 3D World.</p>
+    </div>
+    
+    <form id="project-form" class="space-y-4">
+      <div>
+       <input 
+        type="text" 
+        id="client-id"
+        placeholder="Clinet ID" 
+        class="input-field w-full p-3 rounded-xl focus:outline-none"
+        required
+>
+      </div>
+      
+      <div>
+       
+        <input 
+          type="text" 
+          id="project-number"
+          placeholder="##-######" 
+          class="input-field w-full p-3 rounded-xl focus:outline-none"
+          required
+        >
+      </div>
+      
+      <button 
+        type="submit" 
+        id="submit-btn"
+        class="btn-primary w-full text-white py-3 rounded-xl font-semibold text-lg"
+      >
+        Load 3D Model
+      </button>
+    </form>
+    
+    <p id="error-message" class="error text-center font-medium mt-3"></p>
+    <p id="success-message" class="success text-center font-medium mt-3"></p>
+    <div id="debug-info" class="debug-info">
+      <strong>Debug Info:</strong> <span id="debug-text"></span>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('project-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const errorMessage = document.getElementById('error-message');
+    const successMessage = document.getElementById('success-message');
+    const debugInfo = document.getElementById('debug-info');
+    const debugText = document.getElementById('debug-text');
+
+    // Clear messages
+    function clearMessages() {
+      errorMessage.style.display = 'none';
+      successMessage.style.display = 'none';
+      debugInfo.style.display = 'none';
+    }
+
+    // Show error with shake animation
+    function showError(message) {
+      clearMessages();
+      errorMessage.textContent = message;
+      errorMessage.style.display = 'block';
+      errorMessage.classList.add('shake');
+      setTimeout(() => errorMessage.classList.remove('shake'), 500);
+    }
+
+    // Show success
+    function showSuccess(message) {
+      clearMessages();
+      successMessage.textContent = message;
+      successMessage.style.display = 'block';
+    }
+
+    // Show debug info
+    function showDebug(message) {
+      debugText.textContent = message;
+      debugInfo.style.display = 'block';
+    }
+
+    // Set loading state
+    function setLoading(loading) {
+      submitBtn.disabled = loading;
+      submitBtn.innerHTML = loading 
+        ? '<span class="loading"></span> Loading...' 
+        : 'Load 3D Model';
+    }
+
+    // Form submission
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const clientId = document.getElementById('client-id').value.trim();
+      const projectNumber = document.getElementById('project-number').value.trim();
+      
+      if (!clientId || !projectNumber) {
+        showError('Please enter both Client ID and Project Number.');
+        showDebug('Input validation failed: Empty clientId or projectNumber');
+        return;
+      }
+      
+      clearMessages();
+      setLoading(true);
+      
+      try {
+        console.log(`📡 Sending request for ${clientId}/${projectNumber}`);
+        showDebug(`Requesting /api/client/${clientId}/project/${projectNumber}`);
+        
+        const response = await fetch(`/api/client/${encodeURIComponent(clientId)}/project/${encodeURIComponent(projectNumber)}`);
+        console.log('📡 Response status:', response.status, response.statusText);
+        
+        const textResponse = await response.text();
+        console.log('📄 Raw response:', textResponse.substring(0, 200) + (textResponse.length > 200 ? '...' : ''));
+        
+        let result;
+        try {
+          result = JSON.parse(textResponse);
+          console.log('✅ Parsed response:', result);
+        } catch (parseError) {
+          console.error('❌ JSON parse error:', parseError);
+          throw new Error('Invalid server response format');
+        }
+        
+        if (response.ok) {
+          showSuccess(`Loading ${projectNumber} for ${clientId}...`);
+          showDebug(`Success: Found ${clientId}/${projectNumber}, redirecting to viewer`);
+          setTimeout(() => {
+        const viewerUrl = `/viewer.html?clientName=${encodeURIComponent(clientId)}&projectId=${encodeURIComponent(projectNumber)}`;
+         window.location.href = viewerUrl;
+          }, 1000);
+        } else {
+          showError(result.error || `Cannot access ${projectNumber}. Check Client ID and Project Number.`);
+          showDebug(`Error: ${result.error || 'Unknown server error'} (Status: ${response.status})`);
+          console.error('❌ Server error:', result);
+        }
+      } catch (error) {
+        console.error('❌ Network or fetch error:', error);
+        showError('Connection error. Please check your network and try again.');
+        showDebug(`Fetch failed: ${error.message}`);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    // Input validation (real-time feedback)
+    const inputs = document.querySelectorAll('input[required]');
+    inputs.forEach(input => {
+      input.addEventListener('blur', (e) => {
+        if (e.target.value.trim() === '') {
+          e.target.classList.add('border-red-300');
+        } else {
+          e.target.classList.remove('border-red-300');
+        }
+      });
+      
+      input.addEventListener('input', (e) => {
+        if (e.target.value.trim() !== '') {
+          e.target.classList.remove('border-red-300');
+        }
+      });
+    });
+
+    // Focus first input on page load
+    document.getElementById('client-id').focus();
+
+    // Test API connectivity on load
+    console.log('🔍 Testing API connectivity...');
+    fetch('/api/admin/clients')
+      .then(r => r.text())
+      .then(text => {
+        console.log('📡 /api/admin/clients response:', text.substring(0, 200) + '...');
+        try {
+          const data = JSON.parse(text);
+          console.log('✅ API test: Server responded with client data');
+          showDebug('API test: Server connection successful');
+        } catch (e) {
+          console.error('❌ API test: Invalid JSON response', e);
+          showDebug('API test: Server returned invalid data');
+        }
+      })
+      .catch(e => {
+        console.error('❌ API test: Connection failed', e);
+        showDebug('API test: Failed to connect to server');
+      });
+  </script>
+</body>
+</html>

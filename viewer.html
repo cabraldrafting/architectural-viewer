@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Model Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #viewer { width: 100vw; height: 100vh; }
+    #info {
+      position: absolute; top: 10px; left: 10px; color: white;
+      background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px;
+      z-index: 100; font-family: Arial; max-width: 300px; font-size: 14px;
+    }
+    #controls {
+      position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7);
+      padding: 10px; border-radius: 5px; z-index: 100; color: white; font-size: 14px;
+    }
+    @media (max-width: 640px) {
+      #viewer { height: calc(100vh - 120px); }
+      #info, #controls { font-size: 12px; padding: 8px; max-width: 200px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer">
+    <div id="info"></div>
+    <div id="controls" class="space-y-2">
+      <div>WASD: Move</div>
+      <div>Mouse: Look around</div>
+      <div>Space: Lock/Unlock cursor</div>
+      <button id="zoom-in" class="bg-blue-600 px-3 py-1 rounded hover:bg-blue-700 w-full text-center">Zoom In</button>
+      <button id="zoom-out" class="bg-blue-600 px-3 py-1 rounded hover:bg-blue-700 w-full text-center">Zoom Out</button>
+      <button id="reset-view" class="bg-blue-600 px-3 py-1 rounded hover:bg-blue-700 w-full text-center">Reset View</button>
+    </div>
+  </div>
+
+  <script>
+    console.log('🚀 Starting viewer.js...');
+
+    // Get URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const clientName = urlParams.get('clientName') || urlParams.get('clientId'); // Support both
+    const projectId = urlParams.get('projectId');  
+
+    if (!clientId || !projectId) {
+      document.body.innerHTML = `
+        <div class="flex items-center justify-center h-screen bg-gray-900">
+          <div class="bg-white rounded-lg p-8 text-center max-w-md mx-auto">
+            <h1 class="text-2xl font-bold text-gray-800 mb-2">No Project Specified</h1>
+            <p class="text-gray-600 mb-4">Please go back and enter valid client and project details.</p>
+            <a href="/index.html" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">Back to Projects</a>
+          </div>
+        </div>
+      `;
+    } else {
+      console.log(`📡 Loading project: ${clientId}/${projectId}`);
+
+      // Scene setup
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 17.5, 5); // Eye-level height
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      document.getElementById('viewer').appendChild(renderer.domElement);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      directionalLight.position.set(0, 10, 10);
+      directionalLight.castShadow = true;
+      scene.add(directionalLight);
+
+      // Ground plane (commented out as per your setup)
+      /*
+      const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+      const groundMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      */
+
+      // Controls
+      const controls = new THREE.PointerLockControls(camera, renderer.domElement);
+      document.addEventListener('click', () => controls.lock());
+      controls.addEventListener('lock', () => console.log('🔒 Controls locked'));
+      controls.addEventListener('unlock', () => console.log('🔓 Controls unlocked'));
+
+      // Movement
+      const keys = { forward: false, backward: false, left: false, right: false };
+      document.addEventListener('keydown', (e) => {
+        if (e.code === 'KeyW') keys.forward = true;
+        if (e.code === 'KeyS') keys.backward = true;
+        if (e.code === 'KeyA') keys.left = true;
+        if (e.code === 'KeyD') keys.right = true;
+      });
+      document.addEventListener('keyup', (e) => {
+        if (e.code === 'KeyW') keys.forward = false;
+        if (e.code === 'KeyS') keys.backward = false;
+        if (e.code === 'KeyA') keys.left = false;
+        if (e.code === 'KeyD') keys.right = false;
+      });
+
+      // Collision detection
+      const objects = [];
+      const velocity = new THREE.Vector3();
+      const direction = new THREE.Vector3();
+      const speed = 0.1;
+      let lastTime = performance.now();
+
+      // Model loading
+      let modelGroup = new THREE.Group();
+      scene.add(modelGroup);
+
+      async function loadModel() {
+        try {
+          console.log(`📡 Fetching project ${clientId}/${projectId}`);
+          const response = await fetch(`/api/client/${encodeURIComponent(clientId)}/project/${encodeURIComponent(projectId)}`);
+          const data = await response.json();
+          
+          if (!response.ok) {
+            throw new Error(data.error || 'Project not found');
+          }
+          
+          // Display project info
+          document.getElementById('info').innerHTML = `
+            <strong>Client:</strong> ${data.clientName}<br>
+            <strong>Project:</strong> ${data.projectName}<br>
+            <strong>Description:</strong> ${data.description || 'No description available'}
+          `;
+          
+          console.log(`✅ Loading model: ${data.modelPath}`);
+          
+          if (data.modelPath.endsWith('.obj')) {
+            const mtlPath = data.modelPath.replace('.obj', '.mtl');
+            const mtlLoader = new THREE.MTLLoader();
+            const objLoader = new THREE.OBJLoader();
+            
+            mtlLoader.load(mtlPath, (materials) => {
+              console.log('✅ MTL loaded');
+              materials.preload();
+              objLoader.setMaterials(materials);
+              loadOBJ(data.modelPath);
+            }, undefined, (error) => {
+              console.warn('⚠ No MTL or error:', error);
+              loadOBJ(data.modelPath);
+            });
+            
+            function loadOBJ(modelPath) {
+              objLoader.load(modelPath, (obj) => {
+                console.log('✅ OBJ loaded');
+                obj.traverse((child) => {
+                  if (child.isMesh) {
+                    if (!child.material) {
+                      child.material = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
+                    }
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    objects.push(child);
+                  }
+                });
+                modelGroup.add(obj);
+                modelGroup.scale.set(1.5, 1.5, 1.5);
+                centerModel();
+              }, undefined, (error) => {
+                console.error('❌ OBJ load error:', error);
+                document.getElementById('info').innerHTML = '<span class="text-red-500">Error loading OBJ model</span>';
+              });
+            }
+          } else {
+            const gltfLoader = new THREE.GLTFLoader();
+            gltfLoader.load(data.modelPath, (gltf) => {
+              console.log('✅ GLTF loaded');
+              gltf.scene.traverse((child) => {
+                if (child.isMesh) {
+                  child.castShadow = true;
+                  child.receiveShadow = true;
+                  objects.push(child);
+                }
+              });
+              modelGroup.add(gltf.scene);
+              modelGroup.scale.set(1.5, 1.5, 1.5);
+              centerModel();
+            }, (progress) => {
+              console.log(`📈 Loading: ${Math.round((progress.loaded / progress.total) * 100)}%`);
+            }, (error) => {
+              console.error('❌ GLTF load error:', error);
+              document.getElementById('info').innerHTML = '<span class="text-red-500">Error loading GLTF model</span>';
+            });
+          }
+          
+          function centerModel() {
+            const box = new THREE.Box3().setFromObject(modelGroup);
+            const center = box.getCenter(new THREE.Vector3());
+            modelGroup.position.sub(center);
+            console.log('✅ Model centered');
+          }
+        } catch (error) {
+          console.error('❌ Fetch error:', error);
+          document.getElementById('info').innerHTML = `<span class="text-red-500">${error.message}</span>`;
+        }
+      }
+
+      // Zoom controls
+      let zoomLevel = 1;
+      document.getElementById('zoom-in').addEventListener('click', () => {
+        zoomLevel *= 1.2;
+        camera.position.z /= 1.2;
+      });
+      document.getElementById('zoom-out').addEventListener('click', () => {
+        zoomLevel /= 1.2;
+        camera.position.z *= 1.2;
+      });
+      document.getElementById('reset-view').addEventListener('click', () => {
+        zoomLevel = 1;
+        camera.position.set(0, 17.5, 5);
+        controls.getObject().rotation.set(0, 0, 0);
+      });
+
+      // Animation loop
+      function animate() {
+        requestAnimationFrame(animate);
+        const time = performance.now();
+        const delta = (time - lastTime) / 1000;
+        lastTime = time;
+
+        if (controls.isLocked) {
+          // Movement
+          direction.set(0, 0, 0);
+          if (keys.forward) direction.z -= 1;
+          if (keys.backward) direction.z += 1;
+          if (keys.left) direction.x -= 1;
+          if (keys.right) direction.x += 1;
+
+          // Apply movement
+          direction.normalize();
+          velocity.x = direction.x * speed;
+          velocity.z = direction.z * speed;
+
+          // Collision detection
+          const originPoint = camera.position.clone();
+          const raycaster = new THREE.Raycaster();
+          for (let vertexIndex = 0; vertexIndex < 8; vertexIndex++) {
+            const localVertex = new THREE.Vector3(
+              (vertexIndex & 1) ? 0.5 : -0.5,
+              (vertexIndex & 2) ? 0.5 : -0.5,
+              (vertexIndex & 4) ? 0.5 : -0.5
+            );
+            const globalVertex = localVertex.applyMatrix4(camera.matrixWorld);
+            const directionVector = globalVertex.sub(camera.position);
+            raycaster.set(originPoint, directionVector.clone().normalize());
+            const intersections = raycaster.intersectObjects(objects, true);
+            if (intersections.length > 0 && intersections[0].distance < directionVector.length()) {
+              velocity.x = 0;
+              velocity.z = 0;
+              break;
+            }
+          }
+
+          controls.moveRight(velocity.x);
+          controls.moveForward(velocity.z);
+        }
+
+        renderer.render(scene, camera);
+      }
+
+      // Handle resize
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Start
+      loadModel();
+      animate();
+    }
+  </script>
+</body>
+</html>
